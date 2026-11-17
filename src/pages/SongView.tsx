@@ -2,14 +2,25 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, 
 import PageSvg from '../components/PageSvg'
 import Toolbar, { COLORS, SIZES, type Tool } from '../components/Toolbar'
 import { pathFor, strokeCenter, strokeHit } from '../ink/geometry'
-import { PAGE_H, PAGE_W, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter } from '../layout'
+import { PAGE_H, PAGE_W, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
+import { recognize } from '../ink/recognize'
 import { downloadBlob, getSong, saveSong } from '../store/db'
-import { uid, type Finger, type Mark, type Point, type Song, type Stroke } from '../types'
+import { uid, type Finger, type Mark, type Point, type Song, type Stroke, type TextEntry } from '../types'
 
 /** Lo que guarda el historial de deshacer */
-type Snapshot = { strokes: Stroke[]; marks: Mark[] }
+type Snapshot = { strokes: Stroke[]; marks: Mark[]; texts: Record<string, TextEntry> }
+/** ms sin escribir en una zona antes de pasarla a letra de imprenta */
+const RECOGNIZE_DELAY = 1000
 /** Un trazo mas chico que esto (en unidades de pagina) cuenta como toque */
 const TAP_SIZE = 9
+
+interface TextEditor {
+  key: string
+  text: string
+  color: string
+  clientX: number
+  clientY: number
+}
 
 interface FingerPicker {
   cell: number
@@ -44,7 +55,7 @@ function savePref(key: string, v: unknown) {
 
 type Active =
   | { id: number; mode: 'draw'; points: Point[]; simulate: boolean; color: string; size: number }
-  | { id: number; mode: 'erase'; base: Snapshot; strokes: Stroke[]; marks: Mark[] }
+  | { id: number; mode: 'erase'; base: Snapshot; strokes: Stroke[]; marks: Mark[]; texts: Record<string, TextEntry> }
 
 function markAt(marks: Mark[], cell: number, string: number) {
   return marks.find((m) => m.cell === cell && m.string === string)
@@ -79,7 +90,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
 
   // ---------- carga y autoguardado ----------
   useEffect(() => {
-    getSong(id).then((s) => setSong(s ? { ...s, marks: s.marks ?? [] } : null))
+    getSong(id).then((s) => setSong(s ? { ...s, marks: s.marks ?? [], texts: s.texts ?? {} } : null))
   }, [id])
 
   const dirty = useRef(false)
@@ -120,7 +131,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const redoStack = useRef<Snapshot[]>([])
   const [, bump] = useReducer((x: number) => x + 1, 0)
 
-  const snap = (s: Song): Snapshot => ({ strokes: s.strokes, marks: s.marks })
+  const snap = (s: Song): Snapshot => ({ strokes: s.strokes, marks: s.marks, texts: s.texts })
   const pushUndo = (prev: Snapshot) => {
     undoStack.current.push(prev)
     if (undoStack.current.length > 200) undoStack.current.shift()
@@ -147,6 +158,74 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     if (!s || !next) return
     undoStack.current.push(snap(s))
     update({ ...s, ...next, updatedAt: Date.now() })
+  }
+
+  // ---------- pasar a letra de imprenta ----------
+  const [toPrint, setToPrintState] = useState(() => loadPref('toPrint', true))
+  const setToPrint = (v: boolean) => (setToPrintState(v), savePref('toPrint', v))
+  const [converting, setConverting] = useState(0)
+  const [editor, setEditor] = useState<TextEditor | null>(null)
+  const zoneTimers = useRef(new Map<string, number>())
+
+  const scheduleZone = (key: string) => {
+    const timers = zoneTimers.current
+    clearTimeout(timers.get(key))
+    timers.set(key, window.setTimeout(() => convertZone(key), RECOGNIZE_DELAY))
+  }
+
+  const convertZone = async (key: string) => {
+    zoneTimers.current.delete(key)
+    // si esta escribiendo, esperar a que termine
+    if (active.current?.mode === 'draw') return scheduleZone(key)
+    const s = songRef.current
+    if (!s) return
+    const zone = textZones(s.boxes).find((z) => z.key === key)
+    const strokes = s.strokes.filter((st) => st.zone === key)
+    if (!zone || !strokes.length) return
+    setConverting((c) => c + 1)
+    const text = await recognize(strokes, zone.rect.w, zone.rect.h, zone.digits)
+    setConverting((c) => c - 1)
+    const cur = songRef.current
+    if (!text || !cur) return
+    const ids = new Set(strokes.map((st) => st.id))
+    // si mientras tanto se borro o deshizo, no tocar nada
+    if (!cur.strokes.some((st) => ids.has(st.id))) return
+    const prev = cur.texts[key]?.text
+    const joined = prev ? (zone.digits ? prev + text : prev + ' ' + text) : text
+    commit({
+      strokes: cur.strokes.filter((st) => !ids.has(st.id)),
+      texts: { ...cur.texts, [key]: { text: joined, color: strokes[0].color } },
+    })
+  }
+
+  // al abrir: convertir lo que haya quedado escrito sin convertir
+  const loadedRef = useRef(false)
+  useEffect(() => {
+    if (!song || loadedRef.current) return
+    loadedRef.current = true
+    if (toPrint) new Set(song.strokes.map((st) => st.zone).filter(Boolean) as string[]).forEach(scheduleZone)
+  })
+  useEffect(() => () => zoneTimers.current.forEach((t) => clearTimeout(t)), [])
+
+  /** Toque sobre un texto ya convertido: abrir el editor para corregirlo. */
+  const tapText = (x: number, y: number, clientX: number, clientY: number): boolean => {
+    const s = songRef.current
+    if (!s) return false
+    const z = zoneAt(s.boxes, x, y)
+    const t = z && s.texts[z.key]
+    if (!z || !t || !onText(z, t.text, x, y) || s.strokes.some((st) => st.zone === z.key)) return false
+    setEditor({ key: z.key, text: t.text, color: t.color, clientX, clientY })
+    return true
+  }
+
+  const saveText = (text: string | null) => {
+    const s = songRef.current
+    if (!s || !editor) return
+    const texts = { ...s.texts }
+    if (text && text.trim()) texts[editor.key] = { text: text.trim(), color: editor.color }
+    else delete texts[editor.key]
+    commit({ texts })
+    setEditor(null)
   }
 
   // ---------- dedos ----------
@@ -260,10 +339,19 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       const [mx, my] = markCenter(d, m.string, m.fret)
       return Math.hypot(mx - x, my - y) > ERASER_R + d.s * 0.4
     })
-    if (strokes.length !== a.strokes.length || marks.length !== a.marks.length) {
+    let texts = a.texts
+    for (const z of textZones(s.boxes)) {
+      const t = texts[z.key]
+      if (t && onText(z, t.text, x, y)) {
+        texts = { ...texts }
+        delete texts[z.key]
+      }
+    }
+    if (strokes.length !== a.strokes.length || marks.length !== a.marks.length || texts !== a.texts) {
       a.strokes = strokes
       a.marks = marks
-      commit({ strokes, marks }, false)
+      a.texts = texts
+      commit({ strokes, marks, texts }, false)
     }
   }
 
@@ -278,7 +366,11 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       return !(cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h)
     })
     const marks = s.marks.filter((m) => m.cell !== idx)
-    if (next.length !== s.strokes.length || marks.length !== s.marks.length) commit({ strokes: next, marks })
+    const texts = { ...s.texts }
+    delete texts['name-' + idx]
+    delete texts['fret-' + idx]
+    if (next.length !== s.strokes.length || marks.length !== s.marks.length || Object.keys(texts).length !== Object.keys(s.texts).length)
+      commit({ strokes: next, marks, texts })
     setTool('pen')
   }
 
@@ -302,6 +394,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const t = e.pointerType
     const now = performance.now()
     if (picker) setPicker(null)
+    if (editor) setEditor(null)
     if (t === 'pen') {
       lastPen.current = now
       touches.current.clear()
@@ -323,7 +416,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const eraserButton = (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0
     if (tool === 'clear' && !eraserButton) return clearCell(x, y)
     if (tool === 'eraser' || eraserButton) {
-      const a: Active = { id: e.pointerId, mode: 'erase', base: snap(s), strokes: s.strokes, marks: s.marks }
+      const a: Active = { id: e.pointerId, mode: 'erase', base: snap(s), strokes: s.strokes, marks: s.marks, texts: s.texts }
       active.current = a
       eraseAt(a, x, y)
       showCursor(x, y, true)
@@ -402,12 +495,18 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       const xs = a.points.map((p) => p[0])
       const ys = a.points.map((p) => p[1])
       const isTap = Math.max(...xs) - Math.min(...xs) < TAP_SIZE && Math.max(...ys) - Math.min(...ys) < TAP_SIZE
-      if (!(isTap && tapString(a.points[0][0], a.points[0][1], e.clientX, e.clientY))) {
-        const stroke: Stroke = { id: uid(), color: a.color, size: a.size, simulate: a.simulate, points: a.points }
+      const [x0, y0] = a.points[0]
+      const handled = isTap && (tapString(x0, y0, e.clientX, e.clientY) || tapText(x0, y0, e.clientX, e.clientY))
+      if (!handled) {
+        const cx = (Math.max(...xs) + Math.min(...xs)) / 2
+        const cy = (Math.max(...ys) + Math.min(...ys)) / 2
+        const zone = toPrint ? zoneAt(s.boxes, cx, cy) : undefined
+        const stroke: Stroke = { id: uid(), color: a.color, size: a.size, simulate: a.simulate, points: a.points, zone: zone?.key }
         commit({ strokes: [...s.strokes, stroke] })
+        if (zone) scheduleZone(zone.key)
       }
     } else if (a.mode === 'erase') {
-      if (a.strokes !== a.base.strokes || a.marks !== a.base.marks) pushUndo(a.base)
+      if (a.strokes !== a.base.strokes || a.marks !== a.base.marks || a.texts !== a.base.texts) pushUndo(a.base)
       showCursor(0, 0, tool === 'eraser' && e.pointerType !== 'touch')
     }
     renderLive()
@@ -482,6 +581,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         }}
         fingerDraws={fingerDraws}
         setFingerDraws={setFingerDraws}
+        toPrint={toPrint}
+        setToPrint={setToPrint}
         onExportPng={exportPng}
       />
       <div
@@ -496,12 +597,18 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={pageRef} className="mx-auto shadow-lg" style={{ width: pageW }}>
-          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes} marks={song.marks}>
+          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes} marks={song.marks} texts={song.texts}>
             <path ref={liveRef} data-overlay="" d="" />
             <circle ref={cursorRef} data-overlay="" r={ERASER_R} fill="rgba(220,38,38,0.08)" stroke="#dc2626" strokeWidth={1.5} visibility="hidden" />
           </PageSvg>
         </div>
       </div>
+      {converting > 0 && (
+        <div className="pointer-events-none fixed right-4 bottom-4 z-10 rounded-full bg-slate-800/90 px-4 py-2 text-sm text-stone-100 shadow">
+          Pasando a letra de imprenta...
+        </div>
+      )}
+      {editor && <TextEditorPopup editor={editor} onSave={saveText} onClose={() => setEditor(null)} />}
       {picker && <FingerPickerPopup picker={picker} onPick={pickFinger} onClose={() => setPicker(null)} />}
     </div>
   )
@@ -541,6 +648,39 @@ function FingerPickerPopup({ picker, onPick, onClose }: { picker: FingerPicker; 
           Quitar
         </button>
       </div>
+    </>
+  )
+}
+
+function TextEditorPopup({ editor, onSave, onClose }: { editor: TextEditor; onSave: (t: string | null) => void; onClose: () => void }) {
+  const [value, setValue] = useState(editor.text)
+  const W = 360
+  const left = Math.min(Math.max(8, editor.clientX - W / 2), window.innerWidth - W - 8)
+  const top = editor.clientY + 30 + 70 < window.innerHeight ? editor.clientY + 30 : Math.max(8, editor.clientY - 100)
+  return (
+    <>
+      <div className="fixed inset-0 z-20" onPointerDown={onClose} />
+      <form
+        className="fixed z-30 flex items-center gap-2 rounded-2xl bg-slate-800 p-2 shadow-2xl"
+        style={{ left, top, width: W }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave(value)
+        }}
+      >
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="h-12 min-w-0 flex-1 rounded-lg bg-white px-3 text-lg text-slate-900 focus:outline-2 focus:outline-amber-400"
+        />
+        <button type="submit" className="h-12 rounded-lg bg-amber-400 px-4 font-medium text-slate-900">
+          Listo
+        </button>
+        <button type="button" onClick={() => onSave(null)} className="h-12 rounded-lg px-2 text-sm text-stone-200">
+          Borrar
+        </button>
+      </form>
     </>
   )
 }

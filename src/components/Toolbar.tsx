@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowLeft, Download, Eraser, Hand, MoreVertical, Pencil, Redo2, SquareX, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, Download, Eraser, Hand, Type, MoreVertical, Pencil, Redo2, SquareX, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
 
 export type Tool = 'pen' | 'eraser' | 'clear'
 
@@ -52,6 +52,8 @@ interface Props {
   onZoom: (factor: number) => void
   fingerDraws: boolean
   setFingerDraws: (v: boolean) => void
+  toPrint: boolean
+  setToPrint: (v: boolean) => void
   onExportPng: () => void
 }
 
@@ -135,6 +137,14 @@ export default function Toolbar(p: Props) {
           >
             <Download size={20} /> Guardar hoja como imagen
           </button>
+          <label className="flex w-full items-center gap-3 rounded-lg px-3 py-3 hover:bg-slate-700">
+            <Type size={20} />
+            <span className="flex-1">Pasar a letra de imprenta</span>
+            <input type="checkbox" className="h-5 w-5 accent-amber-400" checked={p.toPrint} onChange={(e) => p.setToPrint(e.target.checked)} />
+          </label>
+          <p className="px-3 pb-2 text-xs text-slate-400">
+            Lo que escribas en el titulo, capo, nombre del acorde, traste y notas se convierte en texto (necesita internet). Toca un texto para corregirlo.
+          </p>
           <label className="flex w-full items-center gap-3 rounded-lg px-3 py-3 hover:bg-slate-700">
             <Hand size={20} />
             <span className="flex-1">Dibujar con el dedo</span>

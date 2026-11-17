@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import {
-  FRETS, MARGIN, NOTES_LINE_GAP, NOTES_TOP, PAGE_H, PAGE_W, STRINGS, STRING_NAMES, TITLE_LABEL_Y, TITLE_LINE_Y,
+  CAPO_X, FRETS, MARGIN, NOTES_TOP, PAGE_H, PAGE_W, notesLines, STRINGS, STRING_NAMES, TITLE_LABEL_Y, TITLE_LINE_Y,
   cellRects, diagramGeometry, type Rect,
 } from '../layout'
 import type { BoxCount } from '../types'
@@ -38,9 +38,8 @@ function ChordBox({ cell }: { cell: Rect }) {
 }
 
 function ChordTemplate({ boxes }: { boxes: BoxCount }) {
-  const notesLines: number[] = []
-  for (let y = NOTES_TOP + 55; y < PAGE_H - MARGIN + 5; y += NOTES_LINE_GAP) notesLines.push(y)
-  const capoX = 760
+  const lines = notesLines()
+  const capoX = CAPO_X
   return (
     <g>
       <rect width={PAGE_W} height={PAGE_H} fill="#fffdf8" />
@@ -52,7 +51,7 @@ function ChordTemplate({ boxes }: { boxes: BoxCount }) {
         <ChordBox key={i} cell={c} />
       ))}
       <text x={MARGIN} y={NOTES_TOP + 18} fontSize={18} fill={LABEL} fontFamily={FONT} letterSpacing={1}>NOTAS · RASGUEO · PROGRESION</text>
-      {notesLines.map((y) => (
+      {lines.map((y) => (
         <line key={y} x1={MARGIN} x2={PAGE_W - MARGIN} y1={y} y2={y} stroke="#d6d3d1" strokeWidth={1.2} />
       ))}
     </g>

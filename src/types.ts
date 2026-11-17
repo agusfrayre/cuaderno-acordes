@@ -8,6 +8,13 @@ export interface Stroke {
   /** true cuando no hubo presion real (mouse / dedo) */
   simulate: boolean
   points: Point[]
+  /** zona de texto donde se escribio (se convierte a letra de imprenta) */
+  zone?: string
+}
+
+export interface TextEntry {
+  text: string
+  color: string
 }
 
 export type BoxCount = 6 | 9 | 12
@@ -30,6 +37,8 @@ export interface Song {
   boxes: BoxCount
   strokes: Stroke[]
   marks: Mark[]
+  /** texto reconocido por zona (title, capo, name-3, fret-3, note-0...) */
+  texts: Record<string, TextEntry>
   createdAt: number
   updatedAt: number
 }
