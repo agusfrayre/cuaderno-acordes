@@ -12,11 +12,24 @@ export interface Stroke {
 
 export type BoxCount = 6 | 9 | 12
 
+/** 1-4 = dedo de la mano izquierda, O = cuerda al aire, X = no suena */
+export type Finger = 1 | 2 | 3 | 4 | 'O' | 'X'
+
+export interface Mark {
+  cell: number
+  /** 0 = primera (e aguda, arriba) ... 5 = sexta (E grave, abajo) */
+  string: number
+  /** 1..4 = traste dentro del diagrama, 0 = zona al aire / X */
+  fret: number
+  finger: Finger
+}
+
 export interface Song {
   id: string
   title: string
   boxes: BoxCount
   strokes: Stroke[]
+  marks: Mark[]
   createdAt: number
   updatedAt: number
 }

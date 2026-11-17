@@ -2,9 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, 
 import PageSvg from '../components/PageSvg'
 import Toolbar, { COLORS, SIZES, type Tool } from '../components/Toolbar'
 import { pathFor, strokeCenter, strokeHit } from '../ink/geometry'
-import { PAGE_H, PAGE_W, cellIndexAt, cellRects } from '../layout'
+import { PAGE_H, PAGE_W, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter } from '../layout'
 import { downloadBlob, getSong, saveSong } from '../store/db'
-import { uid, type Point, type Song, type Stroke } from '../types'
+import { uid, type Finger, type Mark, type Point, type Song, type Stroke } from '../types'
+
+/** Lo que guarda el historial de deshacer */
+type Snapshot = { strokes: Stroke[]; marks: Mark[] }
+/** Un trazo mas chico que esto (en unidades de pagina) cuenta como toque */
+const TAP_SIZE = 9
+
+interface FingerPicker {
+  cell: number
+  string: number
+  fret: number
+  clientX: number
+  clientY: number
+  current?: Finger
+}
 
 const ERASER_R = 12
 const MIN_ZOOM = 0.6
@@ -30,7 +44,16 @@ function savePref(key: string, v: unknown) {
 
 type Active =
   | { id: number; mode: 'draw'; points: Point[]; simulate: boolean; color: string; size: number }
-  | { id: number; mode: 'erase'; base: Stroke[]; current: Stroke[] }
+  | { id: number; mode: 'erase'; base: Snapshot; strokes: Stroke[]; marks: Mark[] }
+
+function markAt(marks: Mark[], cell: number, string: number) {
+  return marks.find((m) => m.cell === cell && m.string === string)
+}
+/** Pone (o saca, con finger null) la marca de una cuerda. Cada cuerda tiene una sola marca por acorde. */
+function withMark(marks: Mark[], cell: number, string: number, fret: number, finger: Finger | null): Mark[] {
+  const rest = marks.filter((m) => !(m.cell === cell && m.string === string))
+  return finger === null ? rest : [...rest, { cell, string, fret, finger }]
+}
 
 export default function SongView({ id, onBack }: { id: string; onBack: () => void }) {
   const [song, setSong] = useState<Song | null | undefined>(undefined)
@@ -56,7 +79,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
 
   // ---------- carga y autoguardado ----------
   useEffect(() => {
-    getSong(id).then((s) => setSong(s ?? null))
+    getSong(id).then((s) => setSong(s ? { ...s, marks: s.marks ?? [] } : null))
   }, [id])
 
   const dirty = useRef(false)
@@ -93,35 +116,64 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   }, [])
 
   // ---------- historial ----------
-  const undoStack = useRef<Stroke[][]>([])
-  const redoStack = useRef<Stroke[][]>([])
+  const undoStack = useRef<Snapshot[]>([])
+  const redoStack = useRef<Snapshot[]>([])
   const [, bump] = useReducer((x: number) => x + 1, 0)
 
-  const pushUndo = (prev: Stroke[]) => {
+  const snap = (s: Song): Snapshot => ({ strokes: s.strokes, marks: s.marks })
+  const pushUndo = (prev: Snapshot) => {
     undoStack.current.push(prev)
     if (undoStack.current.length > 200) undoStack.current.shift()
     redoStack.current = []
     bump()
   }
-  const setStrokes = (next: Stroke[], prev?: Stroke[]) => {
+  /** Aplica cambios a trazos / marcas. Con record=true se puede deshacer. */
+  const commit = (patch: Partial<Snapshot>, record = true) => {
     const s = songRef.current
     if (!s) return
-    if (prev) pushUndo(prev)
-    update({ ...s, strokes: next, updatedAt: Date.now() })
+    if (record) pushUndo(snap(s))
+    update({ ...s, ...patch, updatedAt: Date.now() })
   }
   const undo = () => {
     const s = songRef.current
     const prev = undoStack.current.pop()
     if (!s || !prev) return
-    redoStack.current.push(s.strokes)
-    update({ ...s, strokes: prev, updatedAt: Date.now() })
+    redoStack.current.push(snap(s))
+    update({ ...s, ...prev, updatedAt: Date.now() })
   }
   const redo = () => {
     const s = songRef.current
     const next = redoStack.current.pop()
     if (!s || !next) return
-    undoStack.current.push(s.strokes)
-    update({ ...s, strokes: next, updatedAt: Date.now() })
+    undoStack.current.push(snap(s))
+    update({ ...s, ...next, updatedAt: Date.now() })
+  }
+
+  // ---------- dedos ----------
+  const [picker, setPicker] = useState<FingerPicker | null>(null)
+
+  /** Toque sobre una cuerda: en la zona O/X alterna O -> X -> nada; sobre un traste abre el selector de dedo. */
+  const tapString = (x: number, y: number, clientX: number, clientY: number): boolean => {
+    const s = songRef.current
+    if (!s) return false
+    const t = hitTarget(s.boxes, x, y)
+    if (!t) return false
+    const existing = markAt(s.marks, t.cell, t.string)
+    if (t.fret === 0) {
+      const cur = existing?.fret === 0 ? existing.finger : null
+      const next: Finger | null = cur === 'O' ? 'X' : cur === 'X' ? null : 'O'
+      commit({ marks: withMark(s.marks, t.cell, t.string, 0, next) })
+      return true
+    }
+    setPicker({ ...t, clientX, clientY, current: existing?.fret === t.fret ? existing.finger : undefined })
+    return true
+  }
+
+  const pickFinger = (finger: Finger | null) => {
+    const s = songRef.current
+    if (!s || !picker) return
+    commit({ marks: withMark(s.marks, picker.cell, picker.string, picker.fret, finger) })
+    setPicker(null)
   }
 
   // ---------- tamano y zoom ----------
@@ -199,10 +251,19 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   }
 
   const eraseAt = (a: Extract<Active, { mode: 'erase' }>, x: number, y: number) => {
-    const next = a.current.filter((s) => !strokeHit(s, x, y, ERASER_R))
-    if (next.length !== a.current.length) {
-      a.current = next
-      setStrokes(next)
+    const s = songRef.current
+    if (!s) return
+    const strokes = a.strokes.filter((st) => !strokeHit(st, x, y, ERASER_R))
+    const cells = cellRects(s.boxes)
+    const marks = a.marks.filter((m) => {
+      const d = diagramGeometry(cells[m.cell])
+      const [mx, my] = markCenter(d, m.string, m.fret)
+      return Math.hypot(mx - x, my - y) > ERASER_R + d.s * 0.4
+    })
+    if (strokes.length !== a.strokes.length || marks.length !== a.marks.length) {
+      a.strokes = strokes
+      a.marks = marks
+      commit({ strokes, marks }, false)
     }
   }
 
@@ -216,7 +277,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       const [cx, cy] = strokeCenter(st)
       return !(cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h)
     })
-    if (next.length !== s.strokes.length) setStrokes(next, s.strokes)
+    const marks = s.marks.filter((m) => m.cell !== idx)
+    if (next.length !== s.strokes.length || marks.length !== s.marks.length) commit({ strokes: next, marks })
     setTool('pen')
   }
 
@@ -239,6 +301,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const onPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
     const t = e.pointerType
     const now = performance.now()
+    if (picker) setPicker(null)
     if (t === 'pen') {
       lastPen.current = now
       touches.current.clear()
@@ -260,7 +323,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const eraserButton = (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0
     if (tool === 'clear' && !eraserButton) return clearCell(x, y)
     if (tool === 'eraser' || eraserButton) {
-      const a: Active = { id: e.pointerId, mode: 'erase', base: s.strokes, current: s.strokes }
+      const a: Active = { id: e.pointerId, mode: 'erase', base: snap(s), strokes: s.strokes, marks: s.marks }
       active.current = a
       eraseAt(a, x, y)
       showCursor(x, y, true)
@@ -335,10 +398,16 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     active.current = null
     const s = songRef.current
     if (a.mode === 'draw' && s) {
-      const stroke: Stroke = { id: uid(), color: a.color, size: a.size, simulate: a.simulate, points: a.points }
-      setStrokes([...s.strokes, stroke], s.strokes)
+      // un toque (sin arrastrar) sobre una cuerda pone un dedo / O / X en vez de tinta
+      const xs = a.points.map((p) => p[0])
+      const ys = a.points.map((p) => p[1])
+      const isTap = Math.max(...xs) - Math.min(...xs) < TAP_SIZE && Math.max(...ys) - Math.min(...ys) < TAP_SIZE
+      if (!(isTap && tapString(a.points[0][0], a.points[0][1], e.clientX, e.clientY))) {
+        const stroke: Stroke = { id: uid(), color: a.color, size: a.size, simulate: a.simulate, points: a.points }
+        commit({ strokes: [...s.strokes, stroke] })
+      }
     } else if (a.mode === 'erase') {
-      if (a.current !== a.base) pushUndo(a.base)
+      if (a.strokes !== a.base.strokes || a.marks !== a.base.marks) pushUndo(a.base)
       showCursor(0, 0, tool === 'eraser' && e.pointerType !== 'touch')
     }
     renderLive()
@@ -427,12 +496,51 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={pageRef} className="mx-auto shadow-lg" style={{ width: pageW }}>
-          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes}>
+          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes} marks={song.marks}>
             <path ref={liveRef} data-overlay="" d="" />
             <circle ref={cursorRef} data-overlay="" r={ERASER_R} fill="rgba(220,38,38,0.08)" stroke="#dc2626" strokeWidth={1.5} visibility="hidden" />
           </PageSvg>
         </div>
       </div>
+      {picker && <FingerPickerPopup picker={picker} onPick={pickFinger} onClose={() => setPicker(null)} />}
     </div>
+  )
+}
+
+const FINGERS: Finger[] = [1, 2, 3, 4]
+
+function FingerPickerPopup({ picker, onPick, onClose }: { picker: FingerPicker; onPick: (f: Finger | null) => void; onClose: () => void }) {
+  const W = 300
+  const left = Math.min(Math.max(8, picker.clientX - W / 2), window.innerWidth - W - 8)
+  // arriba del punto para que la mano no lo tape; si no entra, abajo
+  const top = picker.clientY - 92 > 8 ? picker.clientY - 92 : picker.clientY + 36
+  return (
+    <>
+      <div className="fixed inset-0 z-20" onPointerDown={onClose} />
+      <div className="fixed z-30 flex items-center gap-2 rounded-2xl bg-slate-800 p-2 shadow-2xl" style={{ left, top, width: W }}>
+        {FINGERS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => onPick(f)}
+            aria-label={`Dedo ${f}`}
+            className={`flex h-14 w-14 items-center justify-center rounded-full text-2xl font-bold ${
+              picker.current === f ? 'bg-amber-400 text-slate-900' : 'bg-stone-100 text-slate-900 active:bg-amber-300'
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onPick(null)}
+          aria-label="Quitar"
+          disabled={picker.current === undefined}
+          className="ml-auto flex h-14 w-14 items-center justify-center rounded-full text-sm text-stone-200 disabled:opacity-30"
+        >
+          Quitar
+        </button>
+      </div>
+    </>
   )
 }

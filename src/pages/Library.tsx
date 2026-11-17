@@ -29,7 +29,7 @@ export default function Library({ onOpen }: { onOpen: (id: string) => void }) {
 
   const create = async () => {
     const now = Date.now()
-    const s: Song = { id: uid(), title: newTitle.trim() || 'Sin titulo', boxes: newBoxes, strokes: [], createdAt: now, updatedAt: now }
+    const s: Song = { id: uid(), title: newTitle.trim() || 'Sin titulo', boxes: newBoxes, strokes: [], marks: [], createdAt: now, updatedAt: now }
     await saveSong(s)
     onOpen(s.id)
   }
@@ -148,7 +148,7 @@ export default function Library({ onOpen }: { onOpen: (id: string) => void }) {
           {songs?.map((s) => (
             <div key={s.id} className="flex flex-col">
               <button type="button" onClick={() => onOpen(s.id)} className="overflow-hidden rounded-xl shadow transition-shadow hover:shadow-lg">
-                <PageSvg boxes={s.boxes} strokes={s.strokes} />
+                <PageSvg boxes={s.boxes} strokes={s.strokes} marks={s.marks} />
               </button>
               <div className="mt-2 flex items-start gap-1">
                 <div className="min-w-0 flex-1">
