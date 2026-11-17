@@ -17,6 +17,7 @@ const TAP_SIZE = 9
 
 interface TextEditor {
   key: string
+  digits: boolean
   text: string
   color: string
   clientX: number
@@ -215,14 +216,19 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   })
   useEffect(() => () => zoneTimers.current.forEach((t) => clearTimeout(t)), [])
 
-  /** Toque sobre un texto ya convertido: abrir el editor para corregirlo. */
-  const tapText = (x: number, y: number, clientX: number, clientY: number): boolean => {
+  /**
+   * Toque en una zona de texto: abre el teclado para escribir o corregir.
+   * Con el lapiz solo sobre un texto ya convertido (un punto suelto puede ser parte de lo que escribe);
+   * con el dedo o el mouse (keyboard=true) tambien en una zona vacia.
+   */
+  const tapText = (x: number, y: number, clientX: number, clientY: number, keyboard = false): boolean => {
     const s = songRef.current
     if (!s) return false
     const z = zoneAt(s.boxes, x, y)
-    const t = z && s.texts[z.key]
-    if (!z || !t || !onText(z, t.text, x, y) || s.strokes.some((st) => st.zone === z.key)) return false
-    setEditor({ key: z.key, text: t.text, color: t.color, clientX, clientY })
+    if (!z || s.strokes.some((st) => st.zone === z.key)) return false
+    const t = s.texts[z.key]
+    if (!keyboard && !(t && onText(z, t.text, x, y))) return false
+    setEditor({ key: z.key, text: t?.text ?? '', color: t?.color ?? color, clientX, clientY, digits: !!z.digits })
     return true
   }
 
@@ -548,7 +554,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       touchTap.current = null
       if (tt && tt.id === e.pointerId && !tt.moved && touches.current.size === 0 && performance.now() - tt.t < TAP_MS) {
         const [x, y] = pageMapper()(tt.x, tt.y)
-        tapString(x, y, tt.x, tt.y) || tapText(x, y, tt.x, tt.y)
+        tapString(x, y, tt.x, tt.y) || tapText(x, y, tt.x, tt.y, true)
       }
       return
     }
@@ -564,7 +570,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       const tapSize = a.touch ? (TAP_PX * PAGE_W) / svgRef.current!.getBoundingClientRect().width : TAP_SIZE
       const isTap = Math.max(...xs) - Math.min(...xs) < tapSize && Math.max(...ys) - Math.min(...ys) < tapSize
       const [x0, y0] = a.points[0]
-      const handled = isTap && (tapString(x0, y0, e.clientX, e.clientY) || tapText(x0, y0, e.clientX, e.clientY))
+      const handled = isTap && (tapString(x0, y0, e.clientX, e.clientY) || tapText(x0, y0, e.clientX, e.clientY, a.simulate))
       // un toque de dedo fuera de las cuerdas no deja un punto de tinta
       const fingerTapMiss = isTap && a.touch && !handled
       if (!handled && !fingerTapMiss) {
@@ -741,11 +747,21 @@ function FingerPickerPopup(props: {
   )
 }
 
+const EDITOR_PLACEHOLDER: Record<string, string> = {
+  title: 'Nombre de la cancion',
+  capo: 'Capo / tono',
+  name: 'Acorde (ej: Am7)',
+  fret: 'Traste',
+  note: 'Notas, rasgueo, progresion',
+}
+
 function TextEditorPopup({ editor, onSave, onClose }: { editor: TextEditor; onSave: (t: string | null) => void; onClose: () => void }) {
   const [value, setValue] = useState(editor.text)
-  const W = 360
-  const left = Math.min(Math.max(8, editor.clientX - W / 2), window.innerWidth - W - 8)
-  const top = editor.clientY + 30 + 70 < window.innerHeight ? editor.clientY + 30 : Math.max(8, editor.clientY - 100)
+  // en pantallas chicas va arriba de todo, para que el teclado no lo tape
+  const small = window.innerWidth < 700
+  const W = small ? window.innerWidth - 16 : 380
+  const left = small ? 8 : Math.min(Math.max(8, editor.clientX - W / 2), window.innerWidth - W - 8)
+  const top = small ? 64 : editor.clientY + 30 + 70 < window.innerHeight ? editor.clientY + 30 : Math.max(8, editor.clientY - 100)
   return (
     <>
       <div className="fixed inset-0 z-20" onPointerDown={onClose} />
@@ -761,6 +777,11 @@ function TextEditorPopup({ editor, onSave, onClose }: { editor: TextEditor; onSa
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          placeholder={EDITOR_PLACEHOLDER[editor.key.split('-')[0]] ?? ''}
+          inputMode={editor.digits ? 'numeric' : 'text'}
+          autoCapitalize="sentences"
+          autoCorrect="off"
+          spellCheck={false}
           className="h-12 min-w-0 flex-1 rounded-lg bg-white px-3 text-lg text-slate-900 focus:outline-2 focus:outline-amber-400"
         />
         <button type="submit" className="h-12 rounded-lg bg-amber-400 px-4 font-medium text-slate-900">

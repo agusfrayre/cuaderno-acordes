@@ -159,7 +159,7 @@ export default function Toolbar(p: Props) {
             <input type="checkbox" className="h-5 w-5 accent-amber-400" checked={p.toPrint} onChange={(e) => p.setToPrint(e.target.checked)} />
           </label>
           <p className="px-3 pb-2 text-xs text-slate-400">
-            Lo que escribas en el titulo, capo, nombre del acorde, traste y notas se convierte en texto (necesita internet). Toca un texto para corregirlo.
+            Lo que escribas en el titulo, capo, nombre del acorde, traste y notas se convierte en texto (necesita internet). Toca un texto para corregirlo. Sin lapiz: toca el renglon con el dedo y se abre el teclado.
           </p>
           <label className="flex w-full items-center gap-3 rounded-lg px-3 py-3 hover:bg-slate-700">
             <Hand size={20} />
