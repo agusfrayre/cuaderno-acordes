@@ -34,6 +34,10 @@ interface FingerPicker {
 const ERASER_R = 12
 const MIN_ZOOM = 0.6
 const MAX_ZOOM = 3
+const IS_PHONE = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) < 600
+/** un toque de dedo que se mueve menos que esto (px) y dura menos que TAP_MS es un toque, no un arrastre */
+const TAP_PX = 10
+const TAP_MS = 500
 /** ms despues del ultimo evento del lapiz en los que se ignoran toques (palma apoyada) */
 const PALM_WINDOW = 700
 
@@ -54,7 +58,7 @@ function savePref(key: string, v: unknown) {
 }
 
 type Active =
-  | { id: number; mode: 'draw'; points: Point[]; simulate: boolean; color: string; size: number }
+  | { id: number; mode: 'draw'; points: Point[]; simulate: boolean; color: string; size: number; client: { x: number; y: number }; touch: boolean }
   | { id: number; mode: 'erase'; base: Snapshot; strokes: Stroke[]; marks: Mark[]; texts: Record<string, TextEntry> }
 
 function markAt(marks: Mark[], cell: number, string: number) {
@@ -74,7 +78,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const [tool, setTool] = useState<Tool>('pen')
   const [color, setColorState] = useState(() => loadPref('color', COLORS[0].value))
   const [size, setSizeState] = useState(() => loadPref('size', SIZES[0].value))
-  const [fingerDraws, setFingerDrawsState] = useState(() => loadPref('fingerDraws', false))
+  // en celulares (sin lapiz) el dedo dibuja por defecto; en la tablet lo hace solo el lapiz
+  const [fingerDraws, setFingerDrawsState] = useState(() => loadPref('fingerDraws', IS_PHONE))
   const [zoom, setZoom] = useState(1)
   const [baseW, setBaseW] = useState(0)
 
@@ -314,6 +319,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const pinch = useRef<{ dist: number; zoom: number } | null>(null)
   const lastPen = useRef(-Infinity)
   const raf = useRef(0)
+  /** toque de un dedo en curso (para distinguir toque de arrastre) */
+  const touchTap = useRef<{ id: number; x: number; y: number; t: number; moved: boolean } | null>(null)
 
   const renderLive = () => {
     raf.current = 0
@@ -413,10 +420,18 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       touches.current.clear()
       pinch.current = null
     }
-    if (t === 'touch' && !fingerDraws) {
+    // con "dibujar con el dedo": un segundo dedo cancela el trazo y pasa a mover / hacer zoom
+    if (t === 'touch' && fingerDraws && active.current?.mode === 'draw' && active.current.touch && active.current.id !== e.pointerId) {
+      const a = active.current
+      active.current = null
+      renderLive()
+      touches.current.set(a.id, a.client)
+    }
+    if (t === 'touch' && (!fingerDraws || touches.current.size > 0)) {
       if (now - lastPen.current < PALM_WINDOW || active.current) return
       touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       capture(e)
+      touchTap.current = touches.current.size === 1 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: now, moved: false } : null
       if (touches.current.size === 2) startPinch()
       return
     }
@@ -442,6 +457,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       simulate: t !== 'pen',
       color,
       size,
+      client: { x: e.clientX, y: e.clientY },
+      touch: t === 'touch',
     }
     scheduleLive()
   }
@@ -460,8 +477,10 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         if (a.mode === 'draw') a.points.push([last[0], last[1], a.simulate ? 0.5 : ev.pressure || 0.5])
         else eraseAt(a, last[0], last[1])
       }
-      if (a.mode === 'draw') scheduleLive()
-      else showCursor(last[0], last[1], true)
+      if (a.mode === 'draw') {
+        a.client = { x: e.clientX, y: e.clientY }
+        scheduleLive()
+      } else showCursor(last[0], last[1], true)
       return
     }
     if ((t === 'pen' || t === 'mouse') && !a) {
@@ -474,6 +493,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const prev = touches.current.get(e.pointerId)
     if (!prev) return
     touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const tt = touchTap.current
+    if (tt && (tt.id !== e.pointerId || Math.hypot(e.clientX - tt.x, e.clientY - tt.y) > TAP_PX)) tt.moved = true
     const sc = scrollerRef.current!
     if (touches.current.size === 1) {
       sc.scrollLeft -= e.clientX - prev.x
@@ -497,6 +518,13 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         pinch.current = null
         anchor.current = null
       }
+      // toque corto de un dedo: igual que un toque del lapiz (dedos, O/X, corregir texto)
+      const tt = touchTap.current
+      touchTap.current = null
+      if (tt && tt.id === e.pointerId && !tt.moved && touches.current.size === 0 && performance.now() - tt.t < TAP_MS) {
+        const [x, y] = pageMapper()(tt.x, tt.y)
+        tapString(x, y, tt.x, tt.y) || tapText(x, y, tt.x, tt.y)
+      }
       return
     }
     const a = active.current
@@ -507,10 +535,14 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       // un toque (sin arrastrar) sobre una cuerda pone un dedo / O / X en vez de tinta
       const xs = a.points.map((p) => p[0])
       const ys = a.points.map((p) => p[1])
-      const isTap = Math.max(...xs) - Math.min(...xs) < TAP_SIZE && Math.max(...ys) - Math.min(...ys) < TAP_SIZE
+      // para el dedo el umbral se mide en px de pantalla (en el celular la hoja se ve chica)
+      const tapSize = a.touch ? (TAP_PX * PAGE_W) / svgRef.current!.getBoundingClientRect().width : TAP_SIZE
+      const isTap = Math.max(...xs) - Math.min(...xs) < tapSize && Math.max(...ys) - Math.min(...ys) < tapSize
       const [x0, y0] = a.points[0]
       const handled = isTap && (tapString(x0, y0, e.clientX, e.clientY) || tapText(x0, y0, e.clientX, e.clientY))
-      if (!handled) {
+      // un toque de dedo fuera de las cuerdas no deja un punto de tinta
+      const fingerTapMiss = isTap && a.touch && !handled
+      if (!handled && !fingerTapMiss) {
         const cx = (Math.max(...xs) + Math.min(...xs)) / 2
         const cy = (Math.max(...ys) + Math.min(...ys)) / 2
         const zone = toPrint ? zoneAt(s.boxes, cx, cy) : undefined

@@ -167,7 +167,7 @@ export default function Toolbar(p: Props) {
             <input type="checkbox" className="h-5 w-5 accent-amber-400" checked={p.fingerDraws} onChange={(e) => p.setFingerDraws(e.target.checked)} />
           </label>
           <p className="px-3 pb-1 text-xs text-slate-400">
-            Normalmente solo el lapiz escribe y los dedos mueven la hoja (pellizcar para zoom). Activalo si el lapiz no responde.
+            Apagado: solo el lapiz escribe y el dedo mueve la hoja. Prendido (ideal en el celular): un dedo escribe y dos dedos mueven / hacen zoom. Tocar una cuerda pone un dedo en los dos modos.
           </p>
         </div>
       )}
