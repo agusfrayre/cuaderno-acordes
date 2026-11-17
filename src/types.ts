@@ -22,6 +22,13 @@ export type BoxCount = 6 | 9 | 12 | 16
 /** 1-4 = dedo de la mano izquierda, O = cuerda al aire, X = no suena */
 export type Finger = 1 | 2 | 3 | 4 | 'O' | 'X'
 
+/** Cejilla: barra sobre el traste `fret` que cubre desde la e aguda (cuerda 0) hasta la cuerda `to` */
+export interface Barre {
+  cell: number
+  fret: number
+  to: number
+}
+
 export interface Mark {
   cell: number
   /** 0 = primera (e aguda, arriba) ... 5 = sexta (E grave, abajo) */
@@ -37,6 +44,8 @@ export interface Song {
   boxes: BoxCount
   strokes: Stroke[]
   marks: Mark[]
+  /** cejillas: barra recta sobre un traste */
+  barres: Barre[]
   /** texto reconocido por zona (title, capo, name-3, fret-3, note-0...) */
   texts: Record<string, TextEntry>
   createdAt: number
