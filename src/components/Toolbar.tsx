@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import type { BoxCount } from '../types'
 import { ArrowLeft, Download, Eraser, Hand, Type, MoreVertical, Pencil, Redo2, SquareX, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
 
 export type Tool = 'pen' | 'eraser' | 'clear'
@@ -54,6 +55,8 @@ interface Props {
   setFingerDraws: (v: boolean) => void
   toPrint: boolean
   setToPrint: (v: boolean) => void
+  boxes: BoxCount
+  setBoxes: (n: BoxCount) => void
   onExportPng: () => void
 }
 
@@ -127,6 +130,19 @@ export default function Toolbar(p: Props) {
       </Btn>
       {menu && (
         <div className="absolute top-full right-2 mt-1 w-64 rounded-xl bg-slate-800 p-2 shadow-xl">
+          <p className="px-3 pt-2 pb-1 text-sm">Acordes por hoja</p>
+          <div className="mb-2 flex gap-1 px-2">
+            {([6, 9, 12, 16] as BoxCount[]).map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => p.setBoxes(n)}
+                className={`h-10 flex-1 rounded-lg text-sm ${p.boxes === n ? 'bg-amber-400 font-semibold text-slate-900' : 'bg-slate-700 text-stone-100'}`}
+              >
+                {n === 16 ? '16 (4x4)' : n}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-slate-700"

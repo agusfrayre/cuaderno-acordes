@@ -5,10 +5,10 @@ import { pathFor, strokeCenter, strokeHit } from '../ink/geometry'
 import { PAGE_H, PAGE_W, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
 import { recognize } from '../ink/recognize'
 import { downloadBlob, getSong, saveSong } from '../store/db'
-import { uid, type Finger, type Mark, type Point, type Song, type Stroke, type TextEntry } from '../types'
+import { uid, type BoxCount, type Finger, type Mark, type Point, type Song, type Stroke, type TextEntry } from '../types'
 
 /** Lo que guarda el historial de deshacer */
-type Snapshot = { strokes: Stroke[]; marks: Mark[]; texts: Record<string, TextEntry> }
+type Snapshot = { strokes: Stroke[]; marks: Mark[]; texts: Record<string, TextEntry>; boxes: BoxCount }
 /** ms sin escribir en una zona antes de pasarla a letra de imprenta */
 const RECOGNIZE_DELAY = 1000
 /** Un trazo mas chico que esto (en unidades de pagina) cuenta como toque */
@@ -131,7 +131,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const redoStack = useRef<Snapshot[]>([])
   const [, bump] = useReducer((x: number) => x + 1, 0)
 
-  const snap = (s: Song): Snapshot => ({ strokes: s.strokes, marks: s.marks, texts: s.texts })
+  const snap = (s: Song): Snapshot => ({ strokes: s.strokes, marks: s.marks, texts: s.texts, boxes: s.boxes })
   const pushUndo = (prev: Snapshot) => {
     undoStack.current.push(prev)
     if (undoStack.current.length > 200) undoStack.current.shift()
@@ -226,6 +226,19 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     else delete texts[editor.key]
     commit({ texts })
     setEditor(null)
+  }
+
+  /** Cambia la cantidad de acordes de la hoja. Los dedos y nombres se mantienen por orden (acorde 1, 2, 3...). */
+  const changeBoxes = (n: BoxCount) => {
+    const s = songRef.current
+    if (!s || s.boxes === n) return
+    const marks = s.marks.filter((m) => m.cell < n)
+    const texts: Record<string, TextEntry> = {}
+    for (const [k, v] of Object.entries(s.texts)) {
+      const m = k.match(/^(name|fret)-(\d+)$/)
+      if (!m || Number(m[2]) < n) texts[k] = v
+    }
+    commit({ boxes: n, marks, texts })
   }
 
   // ---------- dedos ----------
@@ -583,6 +596,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         setFingerDraws={setFingerDraws}
         toPrint={toPrint}
         setToPrint={setToPrint}
+        boxes={song.boxes}
+        setBoxes={changeBoxes}
         onExportPng={exportPng}
       />
       <div
