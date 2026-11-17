@@ -27,7 +27,8 @@ export interface Rect {
 export function gridShape(n: BoxCount): { cols: number; rows: number } {
   if (n === 6) return { cols: 2, rows: 3 }
   if (n === 9) return { cols: 3, rows: 3 }
-  return { cols: 3, rows: 4 }
+  if (n === 12) return { cols: 3, rows: 4 }
+  return { cols: 4, rows: 4 }
 }
 
 export function cellRects(n: BoxCount): Rect[] {

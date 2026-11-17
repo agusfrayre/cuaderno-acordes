@@ -17,7 +17,7 @@ export interface TextEntry {
   color: string
 }
 
-export type BoxCount = 6 | 9 | 12
+export type BoxCount = 6 | 9 | 12 | 16
 
 /** 1-4 = dedo de la mano izquierda, O = cuerda al aire, X = no suena */
 export type Finger = 1 | 2 | 3 | 4 | 'O' | 'X'

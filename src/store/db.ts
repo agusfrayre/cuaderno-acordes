@@ -38,7 +38,7 @@ export async function exportBackup() {
 
 function isSong(x: unknown): x is Song {
   const s = x as Song
-  return !!s && typeof s.id === 'string' && typeof s.title === 'string' && [6, 9, 12].includes(s.boxes) && Array.isArray(s.strokes)
+  return !!s && typeof s.id === 'string' && typeof s.title === 'string' && [6, 9, 12, 16].includes(s.boxes) && Array.isArray(s.strokes)
 }
 
 /** Importa un backup. Las canciones con el mismo id se reemplazan. Devuelve cuantas se importaron. */

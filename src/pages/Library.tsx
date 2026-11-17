@@ -8,6 +8,7 @@ const BOX_OPTIONS: { value: BoxCount; label: string }[] = [
   { value: 6, label: '6 acordes (grandes)' },
   { value: 9, label: '9 acordes' },
   { value: 12, label: '12 acordes' },
+  { value: 16, label: '16 acordes (4x4)' },
 ]
 
 const fmtDate = (t: number) => new Date(t).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
@@ -16,7 +17,7 @@ export default function Library({ onOpen }: { onOpen: (id: string) => void }) {
   const [songs, setSongs] = useState<Song[] | null>(null)
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [newBoxes, setNewBoxes] = useState<BoxCount>(9)
+  const [newBoxes, setNewBoxes] = useState<BoxCount>(16)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
