@@ -32,7 +32,7 @@ export interface Barre {
 
 export interface Mark {
   cell: number
-  /** 0 = primera (e aguda, arriba) ... 5 = sexta (E grave, abajo) */
+  /** 0 = primera (e aguda, se dibuja abajo) ... 5 = sexta (E grave, se dibuja arriba) */
   string: number
   /** 1..4 = traste dentro del diagrama, 0 = zona al aire / X */
   fret: number

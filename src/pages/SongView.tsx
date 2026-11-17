@@ -3,7 +3,7 @@ import PageSvg from '../components/PageSvg'
 import { barreGeometry } from '../components/Marks'
 import Toolbar, { COLORS, SIZES, type Tool } from '../components/Toolbar'
 import { pathFor, strokeCenter, strokeHit } from '../ink/geometry'
-import { PAGE_H, PAGE_W, STRINGS, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
+import { PAGE_H, PAGE_W, STRINGS, rowOf, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
 import { recognize } from '../ink/recognize'
 import { downloadBlob, getSong, saveSong } from '../store/db'
 import { uid, type Barre, type BoxCount, type Finger, type Mark, type Point, type Song, type Stroke, type TextEntry } from '../types'
@@ -263,7 +263,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
   const stringInCell = (cell: number, y: number) => {
     const s = songRef.current!
     const d = diagramGeometry(cellRects(s.boxes)[cell])
-    return Math.max(0, Math.min(STRINGS - 1, Math.round((y - d.gridY) / d.s)))
+    return rowOf(Math.max(0, Math.min(STRINGS - 1, Math.round((y - d.gridY) / d.s))))
   }
 
   /** Termina el gesto de cejilla: arrastre = de cuerda a cuerda; toque = desde la e hasta esa cuerda, o quita la que haya. */

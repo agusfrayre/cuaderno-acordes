@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import {
-  CAPO_X, FRETS, MARGIN, NOTES_TOP, PAGE_H, PAGE_W, notesLines, STRINGS, STRING_NAMES, TITLE_LABEL_Y, TITLE_LINE_Y,
+  CAPO_X, FRETS, MARGIN, NOTES_TOP, PAGE_H, PAGE_W, notesLines, rowOf, STRINGS, STRING_NAMES, TITLE_LABEL_Y, TITLE_LINE_Y,
   cellRects, diagramGeometry, type Rect,
 } from '../layout'
 import type { BoxCount } from '../types'
@@ -18,13 +18,13 @@ function ChordBox({ cell }: { cell: Rect }) {
     <g>
       <line x1={g.nameLine.x1} x2={g.nameLine.x2} y1={g.nameLine.y} y2={g.nameLine.y} stroke={LINE} strokeWidth={1.2} strokeDasharray="4 5" />
       {STRING_NAMES.map((n, i) => (
-        <text key={n + i} x={g.labelX} y={g.gridY + i * g.s} fontSize={g.s * 0.42} fill={LABEL} textAnchor="middle" dominantBaseline="central" fontFamily={FONT}>
+        <text key={n + i} x={g.labelX} y={g.gridY + rowOf(i) * g.s} fontSize={g.s * 0.42} fill={LABEL} textAnchor="middle" dominantBaseline="central" fontFamily={FONT}>
           {n}
         </text>
       ))}
-      {/* cuerdas: la de abajo (E grave) un poco mas gruesa */}
+      {/* cuerdas: la de arriba (E grave) mas gruesa */}
       {Array.from({ length: STRINGS }, (_, i) => (
-        <line key={'s' + i} x1={g.gridX} x2={g.gridX + gridW} y1={g.gridY + i * g.s} y2={g.gridY + i * g.s} stroke={INK} strokeWidth={1.1 + i * 0.22} />
+        <line key={'s' + i} x1={g.gridX} x2={g.gridX + gridW} y1={g.gridY + i * g.s} y2={g.gridY + i * g.s} stroke={INK} strokeWidth={1.1 + rowOf(i) * 0.22} />
       ))}
       {Array.from({ length: FRETS + 1 }, (_, i) => (
         <line key={'f' + i} x1={g.gridX + i * g.f} x2={g.gridX + i * g.f} y1={g.gridY} y2={g.gridY + gridH} stroke={INK} strokeWidth={i === 0 ? 6 : 1.4} strokeLinecap="square" />

@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { cellRects, diagramGeometry, markCenter } from '../layout'
+import { cellRects, diagramGeometry, markCenter, rowOf } from '../layout'
 import type { Barre, BoxCount, Mark } from '../types'
 
 const FILL = '#1c1917'
@@ -7,7 +7,9 @@ const FILL = '#1c1917'
 export function barreGeometry(d: ReturnType<typeof diagramGeometry>, b: Barre) {
   const x = d.gridX + (b.fret - 0.5) * d.f
   const w = d.s * 0.62
-  return { x, w, y1: d.gridY + (b.from ?? 0) * d.s - d.s * 0.36, y2: d.gridY + b.to * d.s + d.s * 0.36 }
+  const r1 = rowOf(b.from ?? 0)
+  const r2 = rowOf(b.to)
+  return { x, w, y1: d.gridY + Math.min(r1, r2) * d.s - d.s * 0.36, y2: d.gridY + Math.max(r1, r2) * d.s + d.s * 0.36 }
 }
 
 function Marks({ boxes, marks, barres }: { boxes: BoxCount; marks: Mark[]; barres: Barre[] }) {

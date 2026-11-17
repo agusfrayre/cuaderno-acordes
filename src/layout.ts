@@ -14,8 +14,15 @@ export const NOTES_LINE_GAP = 54
 
 export const FRETS = 4
 export const STRINGS = 6
-/** de arriba hacia abajo, como en una tablatura */
+/** nombre por numero de cuerda en los datos (0 = e aguda ... 5 = E grave) */
 export const STRING_NAMES = ['e', 'B', 'G', 'D', 'A', 'E']
+
+/**
+ * Fila en pantalla (0 = arriba) de cada cuerda. Se dibuja de arriba hacia abajo E A D G B e,
+ * pero los datos guardan 0 = e aguda, asi las canciones viejas no cambian de significado.
+ * Es su propia inversa: sirve tanto para cuerda -> fila como fila -> cuerda.
+ */
+export const rowOf = (string: number) => STRINGS - 1 - string
 
 export interface Rect {
   x: number
@@ -96,7 +103,7 @@ export function diagramGeometry(cell: Rect): Diagram {
 }
 
 export function markCenter(d: Diagram, string: number, fret: number): [number, number] {
-  const y = d.gridY + string * d.s
+  const y = d.gridY + rowOf(string) * d.s
   return fret === 0 ? [d.xoX, y] : [d.gridX + (fret - 0.5) * d.f, y]
 }
 
@@ -109,8 +116,9 @@ export function hitTarget(n: BoxCount, x: number, y: number): { cell: number; st
   const cell = cellIndexAt(n, x, y)
   if (cell < 0) return null
   const d = diagramGeometry(cellRects(n)[cell])
-  const string = Math.round((y - d.gridY) / d.s)
-  if (string < 0 || string >= STRINGS || Math.abs(y - (d.gridY + string * d.s)) > d.s * 0.5) return null
+  const row = Math.round((y - d.gridY) / d.s)
+  if (row < 0 || row >= STRINGS || Math.abs(y - (d.gridY + row * d.s)) > d.s * 0.5) return null
+  const string = rowOf(row)
   if (x >= d.gridX && x <= d.gridX + FRETS * d.f) return { cell, string, fret: Math.min(FRETS, Math.floor((x - d.gridX) / d.f) + 1) }
   if (x >= d.xoLeft - d.s * 0.2 && x < d.gridX) return { cell, string, fret: 0 }
   return null
