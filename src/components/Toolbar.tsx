@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { BoxCount } from '../types'
 import { ArrowLeft, Download, Eraser, Hand, Type, MoreVertical, Pencil, Redo2, SquareX, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
 
-export type Tool = 'pen' | 'eraser' | 'clear'
+export type Tool = 'pen' | 'eraser' | 'clear' | 'barre'
 
 export const COLORS = [
   { name: 'Negro', value: '#1c1917' },
@@ -80,11 +80,15 @@ export default function Toolbar(p: Props) {
       <Btn label="Goma" active={p.tool === 'eraser'} onClick={() => p.setTool('eraser')}>
         <Eraser size={22} />
       </Btn>
+      <Btn label="Cejilla (toca o arrastra sobre un traste)" active={p.tool === 'barre'} onClick={() => p.setTool(p.tool === 'barre' ? 'pen' : 'barre')}>
+        <span className="inline-block h-6 w-2 rounded-full bg-current" />
+        <span>Cejilla</span>
+      </Btn>
       <Btn label="Limpiar un acorde (toca el acorde)" active={p.tool === 'clear'} onClick={() => p.setTool(p.tool === 'clear' ? 'pen' : 'clear')}>
         <SquareX size={22} />
       </Btn>
       <Sep />
-      {p.tool !== 'eraser' &&
+      {p.tool !== 'eraser' && p.tool !== 'barre' &&
         COLORS.map((c) => (
           <button
             key={c.value}
@@ -101,7 +105,7 @@ export default function Toolbar(p: Props) {
             />
           </button>
         ))}
-      {p.tool !== 'eraser' &&
+      {p.tool !== 'eraser' && p.tool !== 'barre' &&
         SIZES.map((s) => (
           <Btn key={s.value} label={s.name} active={p.size === s.value} onClick={() => p.setSize(s.value)}>
             <span className="block rounded-full bg-current" style={{ width: s.value * 2.4, height: s.value * 2.4 }} />

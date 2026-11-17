@@ -3,7 +3,7 @@ import PageSvg from '../components/PageSvg'
 import { barreGeometry } from '../components/Marks'
 import Toolbar, { COLORS, SIZES, type Tool } from '../components/Toolbar'
 import { pathFor, strokeCenter, strokeHit } from '../ink/geometry'
-import { PAGE_H, PAGE_W, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
+import { PAGE_H, PAGE_W, STRINGS, cellIndexAt, cellRects, diagramGeometry, hitTarget, markCenter, onText, textZones, zoneAt } from '../layout'
 import { recognize } from '../ink/recognize'
 import { downloadBlob, getSong, saveSong } from '../store/db'
 import { uid, type Barre, type BoxCount, type Finger, type Mark, type Point, type Song, type Stroke, type TextEntry } from '../types'
@@ -63,6 +63,7 @@ function savePref(key: string, v: unknown) {
 
 type Active =
   | { id: number; mode: 'draw'; points: Point[]; simulate: boolean; color: string; size: number; client: { x: number; y: number }; touch: boolean }
+  | { id: number; mode: 'barre'; cell: number; fret: number; start: number; end: number }
   | { id: number; mode: 'erase'; base: Snapshot; strokes: Stroke[]; marks: Mark[]; barres: Barre[]; texts: Record<string, TextEntry> }
 
 function markAt(marks: Mark[], cell: number, string: number) {
@@ -256,6 +257,30 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     commit({ boxes: n, marks, barres, texts })
   }
 
+  // ---------- cejilla (herramienta) ----------
+  const [barrePreview, setBarrePreview] = useState<Barre | null>(null)
+
+  const stringInCell = (cell: number, y: number) => {
+    const s = songRef.current!
+    const d = diagramGeometry(cellRects(s.boxes)[cell])
+    return Math.max(0, Math.min(STRINGS - 1, Math.round((y - d.gridY) / d.s)))
+  }
+
+  /** Termina el gesto de cejilla: arrastre = de cuerda a cuerda; toque = desde la e hasta esa cuerda, o quita la que haya. */
+  const finishBarre = (a: Extract<Active, { mode: 'barre' }>) => {
+    setBarrePreview(null)
+    const s = songRef.current
+    if (!s) return
+    const rest = s.barres.filter((b) => !(b.cell === a.cell && b.fret === a.fret))
+    if (a.start === a.end) {
+      const existing = s.barres.find((b) => b.cell === a.cell && b.fret === a.fret && (b.from ?? 0) <= a.start && b.to >= a.start)
+      commit({ barres: existing ? rest : [...rest, { cell: a.cell, fret: a.fret, from: 0, to: a.start }] })
+    } else {
+      commit({ barres: [...rest, { cell: a.cell, fret: a.fret, from: Math.min(a.start, a.end), to: Math.max(a.start, a.end) }] })
+    }
+    setTool('pen')
+  }
+
   // ---------- dedos ----------
   const [picker, setPicker] = useState<FingerPicker | null>(null)
 
@@ -272,7 +297,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       commit({ marks: withMark(s.marks, t.cell, t.string, 0, next) })
       return true
     }
-    const barre = s.barres.some((b) => b.cell === t.cell && b.fret === t.fret && b.to >= t.string)
+    const barre = s.barres.some((b) => b.cell === t.cell && b.fret === t.fret && (b.from ?? 0) <= t.string && b.to >= t.string)
     setPicker({ ...t, clientX, clientY, current: existing?.fret === t.fret ? existing.finger : undefined, barre })
     return true
   }
@@ -282,7 +307,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const s = songRef.current
     if (!s || !picker) return
     const rest = s.barres.filter((b) => !(b.cell === picker.cell && b.fret === picker.fret))
-    commit({ barres: add ? [...rest, { cell: picker.cell, fret: picker.fret, to: picker.string }] : rest })
+    commit({ barres: add ? [...rest, { cell: picker.cell, fret: picker.fret, from: 0, to: picker.string }] : rest })
     setPicker(null)
   }
 
@@ -458,7 +483,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       renderLive()
       touches.current.set(a.id, a.client)
     }
-    if (t === 'touch' && (!fingerDraws || touches.current.size > 0)) {
+    if (t === 'touch' && ((!fingerDraws && tool !== 'barre') || touches.current.size > 0)) {
       if (now - lastPen.current < PALM_WINDOW || active.current) return
       touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       capture(e)
@@ -474,6 +499,13 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     // goma del lapiz (buttons 32) o boton lateral / click derecho (buttons 2)
     const eraserButton = (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0
     if (tool === 'clear' && !eraserButton) return clearCell(x, y)
+    if (tool === 'barre' && !eraserButton) {
+      const target = hitTarget(s.boxes, x, y)
+      if (!target || target.fret === 0) return
+      active.current = { id: e.pointerId, mode: 'barre', cell: target.cell, fret: target.fret, start: target.string, end: target.string }
+      setBarrePreview({ cell: target.cell, fret: target.fret, from: 0, to: target.string })
+      return
+    }
     if (tool === 'eraser' || eraserButton) {
       const a: Active = { id: e.pointerId, mode: 'erase', base: snap(s), strokes: s.strokes, marks: s.marks, barres: s.barres, texts: s.texts }
       active.current = a
@@ -498,6 +530,17 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
     const t = e.pointerType
     if (t === 'pen') lastPen.current = performance.now()
     const a = active.current
+    if (a && a.id === e.pointerId && a.mode === 'barre') {
+      const [, y] = pageMapper()(e.clientX, e.clientY)
+      const end = stringInCell(a.cell, y)
+      if (end !== a.end) {
+        a.end = end
+        const lo = Math.min(a.start, end)
+        const hi = Math.max(a.start, end)
+        setBarrePreview({ cell: a.cell, fret: a.fret, from: a.start === end ? 0 : lo, to: hi })
+      }
+      return
+    }
     if (a && a.id === e.pointerId) {
       const map = pageMapper()
       const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? []
@@ -506,7 +549,7 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
       for (const ev of list) {
         last = map(ev.clientX, ev.clientY)
         if (a.mode === 'draw') a.points.push([last[0], last[1], a.simulate ? 0.5 : ev.pressure || 0.5])
-        else eraseAt(a, last[0], last[1])
+        else if (a.mode === 'erase') eraseAt(a, last[0], last[1])
       }
       if (a.mode === 'draw') {
         a.client = { x: e.clientX, y: e.clientY }
@@ -581,6 +624,8 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         commit({ strokes: [...s.strokes, stroke] })
         if (zone) scheduleZone(zone.key)
       }
+    } else if (a.mode === 'barre') {
+      finishBarre(a)
     } else if (a.mode === 'erase') {
       if (a.strokes !== a.base.strokes || a.marks !== a.base.marks || a.barres !== a.base.barres || a.texts !== a.base.texts) pushUndo(a.base)
       showCursor(0, 0, tool === 'eraser' && e.pointerType !== 'touch')
@@ -675,12 +720,17 @@ export default function SongView({ id, onBack }: { id: string; onBack: () => voi
         onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={pageRef} className="mx-auto shadow-lg" style={{ width: pageW }}>
-          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes} marks={song.marks} barres={song.barres} texts={song.texts}>
+          <PageSvg ref={svgRef} boxes={song.boxes} strokes={song.strokes} marks={song.marks} barres={barrePreview ? [...song.barres.filter((b) => !(b.cell === barrePreview.cell && b.fret === barrePreview.fret)), barrePreview] : song.barres} texts={song.texts}>
             <path ref={liveRef} data-overlay="" d="" />
             <circle ref={cursorRef} data-overlay="" r={ERASER_R} fill="rgba(220,38,38,0.08)" stroke="#dc2626" strokeWidth={1.5} visibility="hidden" />
           </PageSvg>
         </div>
       </div>
+      {tool === 'barre' && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-slate-800/90 px-4 py-2 text-sm text-stone-100 shadow">
+          Cejilla: arrastra sobre un traste de una cuerda a otra, o toca la cuerda donde termina
+        </div>
+      )}
       {converting > 0 && (
         <div className="pointer-events-none fixed right-4 bottom-4 z-10 rounded-full bg-slate-800/90 px-4 py-2 text-sm text-stone-100 shadow">
           Pasando a letra de imprenta...

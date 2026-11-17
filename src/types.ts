@@ -22,10 +22,11 @@ export type BoxCount = 6 | 9 | 12 | 16
 /** 1-4 = dedo de la mano izquierda, O = cuerda al aire, X = no suena */
 export type Finger = 1 | 2 | 3 | 4 | 'O' | 'X'
 
-/** Cejilla: barra sobre el traste `fret` que cubre desde la e aguda (cuerda 0) hasta la cuerda `to` */
+/** Cejilla: barra sobre el traste `fret` que cubre de la cuerda `from` (0 = e aguda si falta) a la `to` */
 export interface Barre {
   cell: number
   fret: number
+  from?: number
   to: number
 }
 
